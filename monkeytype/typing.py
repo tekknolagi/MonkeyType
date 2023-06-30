@@ -18,11 +18,14 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Set,
     Tuple,
     Type,
     TypeVar,
     Union,
+    get_args,
+    get_origin,
 )
 
 from mypy_extensions import TypedDict
@@ -45,6 +48,10 @@ DUMMY_OPTIONAL_TYPED_DICT_NAME = "OPTIONAL_TYPED_DICT_NAME"
 # Functions like shrink_types and get_type construct new types at runtime.
 # Mypy cannot currently type these functions, so the type signatures for this
 # file live in typing.pyi.
+
+
+def is_literal(typ: type) -> bool:
+    return get_origin(typ) == Literal
 
 
 def is_list(typ: type) -> bool:
@@ -162,6 +169,25 @@ def shrink_types(types, max_typed_dict_size):
     return Union[all_dict_types]
 
 
+def shrink_values(types, max_typed_dict_size):
+    assert all(is_literal(ty) for ty in types)
+    values = [get_args(ty)[0] for ty in types]
+    if not values:
+        return int
+    assert all(isinstance(value, int) for value in values)
+    max_val = max(values)
+    min_val = min(values)
+    if max_val <= 2**8-1 and min_val >= 0:
+        return "int8"
+    if max_val <= 2**16-1 and min_val >= 0:
+        return "int16"
+    if max_val <= 2**32-1 and min_val >= 0:
+        return "int32"
+    if max_val <= 2**64-1 and min_val >= 0:
+        return "int64"
+    return int
+
+
 def make_iterator(typ):
     return Iterator[typ]
 
@@ -239,6 +265,12 @@ def get_type(obj, max_typed_dict_size):
     elif typ is tuple:
         return Tuple[tuple(get_type(e, max_typed_dict_size) for e in obj)]
     return typ
+
+
+def get_value(obj, max_typed_dict_size) -> type:
+    if type(obj) is int:
+        return Literal[obj]
+    return Any
 
 
 NoneType = type(None)

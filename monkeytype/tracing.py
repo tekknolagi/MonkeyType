@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Union, cast
 import opcode
 
 from monkeytype.compat import cached_property
-from monkeytype.typing import get_type
+from monkeytype.typing import get_type, get_value
 from monkeytype.util import get_func_fqname
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class CallTrace:
         arg_types: Dict[str, type],
         return_type: Optional[type] = None,
         yield_type: Optional[type] = None,
+        arg_values: Dict[str, type] = None,
     ) -> None:
         """
         Args:
@@ -44,6 +45,7 @@ class CallTrace:
         self.arg_types = arg_types
         self.return_type = return_type
         self.yield_type = yield_type
+        self.arg_values = arg_values
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, self.__class__):
@@ -51,11 +53,12 @@ class CallTrace:
         return NotImplemented
 
     def __repr__(self) -> str:
-        return "CallTrace(%s, %s, %s, %s)" % (
+        return "CallTrace(%s, %s, %s, %s, %s)" % (
             self.func,
             self.arg_types,
             self.return_type,
             self.yield_type,
+            self.arg_values,
         )
 
     def __hash__(self) -> int:
@@ -65,6 +68,7 @@ class CallTrace:
                 frozenset(self.arg_types.items()),
                 self.return_type,
                 self.yield_type,
+                frozenset(self.arg_values.items()),
             )
         )
 
@@ -217,12 +221,17 @@ class CallTracer:
             return
         arg_names = code.co_varnames[0 : code.co_argcount]
         arg_types = {}
+        arg_values = {}
         for name in arg_names:
             if name in frame.f_locals:
                 arg_types[name] = get_type(
                     frame.f_locals[name], max_typed_dict_size=self.max_typed_dict_size
                 )
-        self.traces[frame] = CallTrace(func, arg_types)
+                arg_values[name] = get_value(
+                    frame.f_locals[name], max_typed_dict_size=self.max_typed_dict_size
+                )
+
+        self.traces[frame] = CallTrace(func, arg_types, arg_values=arg_values)
 
     def handle_return(self, frame: FrameType, arg: Any) -> None:
         # In the case of a 'return' event, arg contains the return value, or

@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS {table} (
   qualname    TEXT,
   arg_types   TEXT,
   return_type TEXT,
-  yield_type  TEXT);
+  yield_type  TEXT,
+  arg_values  TEXT);
 """.format(
         table=table
     )
@@ -45,7 +46,7 @@ def make_query(
 ) -> ParameterizedQuery:
     raw_query = """
     SELECT
-        module, qualname, arg_types, return_type, yield_type
+        module, qualname, arg_types, return_type, yield_type, arg_values
     FROM {table}
     WHERE
         module == ?
@@ -58,7 +59,7 @@ def make_query(
         values.append(qualname)
     raw_query += """
     GROUP BY
-        module, qualname, arg_types, return_type, yield_type
+        module, qualname, arg_types, return_type, yield_type, arg_values
     ORDER BY date(created_at) DESC
     LIMIT ?
     """
@@ -88,11 +89,12 @@ class SQLiteStore(CallTraceStore):
                     row.arg_types,
                     row.return_type,
                     row.yield_type,
+                    row.arg_values,
                 )
             )
         with self.conn:
             self.conn.executemany(
-                "INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?)".format(
+                "INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?)".format(
                     table=self.table
                 ),
                 values,

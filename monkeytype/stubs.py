@@ -43,6 +43,7 @@ from monkeytype.typing import (
     make_generator,
     make_iterator,
     shrink_types,
+    shrink_values,
 )
 from monkeytype.util import get_name_in_module, pascal_case
 
@@ -225,11 +226,14 @@ def shrink_traced_types(
 ) -> Tuple[Dict[str, type], Optional[type], Optional[type]]:
     """Merges the traced types and returns the minimally equivalent types"""
     arg_types: DefaultDict[str, Set[type]] = collections.defaultdict(set)
+    arg_values: DefaultDict[str, Set[type]] = collections.defaultdict(set)
     return_types: Set[type] = set()
     yield_types: Set[type] = set()
     for t in traces:
         for arg, typ in t.arg_types.items():
             arg_types[arg].add(typ)
+        for arg, typ in t.arg_values.items():
+            arg_values[arg].add(typ)
         if t.return_type is not None:
             return_types.add(t.return_type)
         if t.yield_type is not None:
@@ -237,6 +241,11 @@ def shrink_traced_types(
     shrunken_arg_types = {
         name: shrink_types(ts, max_typed_dict_size) for name, ts in arg_types.items()
     }
+    shrunken_arg_values = {
+        name: shrink_values(ts, max_typed_dict_size) for name, ts in arg_values.items()
+    }
+    # TODO(max): Merge arg values and arg types if possible. If the primitive
+    # type holds and is more specific, use that.
     return_type = (
         shrink_types(return_types, max_typed_dict_size) if return_types else None
     )

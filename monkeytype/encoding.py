@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 import json
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, TypeVar
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Tuple, Type, TypeVar, get_origin, get_args
 
 from mypy_extensions import TypedDict
 
@@ -13,7 +13,7 @@ from monkeytype.compat import is_any, is_generic, is_union, qualname_of_generic
 from monkeytype.db.base import CallTraceThunk
 from monkeytype.exceptions import InvalidTypeError
 from monkeytype.tracing import CallTrace
-from monkeytype.typing import NoneType, NotImplementedType, is_typed_dict, mappingproxy
+from monkeytype.typing import NoneType, NotImplementedType, is_typed_dict, mappingproxy, is_literal
 from monkeytype.util import get_func_in_module, get_name_in_module
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,8 @@ def type_to_dict(typ: type) -> TypeDict:
         "module": typ.__module__,
         "qualname": qualname,
     }
+    if is_literal(typ):
+        assert is_generic(typ)
     elem_types = getattr(typ, "__args__", None)
     # In Python < 3.9, bare generics still have args
     is_bare_generic = typ in {Dict, List, Tuple}
@@ -80,7 +82,7 @@ def type_to_dict(typ: type) -> TypeDict:
         # which results in __args__ of `((),)` pre-Python 3.11
         if elem_types == ((),):
             elem_types = ()
-        d["elem_types"] = [type_to_dict(t) for t in elem_types]
+        d["elem_types"] = [type_to_dict(t) if isinstance(t, type) else t for t in elem_types]
     return d
 
 
@@ -112,6 +114,8 @@ def type_from_dict(d: TypeDict) -> type:
         typ = _HIDDEN_BUILTIN_TYPES[qualname]
     else:
         typ = get_name_in_module(module, qualname)
+    if module == "typing" and qualname == "Literal":
+        return typ[d["elem_types"][0]]
     if not (isinstance(typ, type) or is_any(typ) or is_generic(typ)):
         raise InvalidTypeError(
             f"Attribute specified by '{qualname}' in module '{module}' "
@@ -119,7 +123,7 @@ def type_from_dict(d: TypeDict) -> type:
         )
     elem_type_dicts = d.get("elem_types")
     if elem_type_dicts is not None and is_generic(typ):
-        elem_types = tuple(type_from_dict(e) for e in elem_type_dicts)
+        elem_types = tuple(type_from_dict(e) if isinstance(e, dict) else e for e in elem_type_dicts)
         # mypy complains that a value of type `type` isn't indexable. That's
         # true, but we know typ is a subtype that is indexable. Even checking
         # with hasattr(typ, '__getitem__') doesn't help
@@ -149,6 +153,19 @@ def arg_types_from_json(arg_types_json: str) -> Dict[str, type]:
     """Reify the encoded argument types from the format produced by arg_types_to_json."""
     arg_types = json.loads(arg_types_json)
     return {name: type_from_dict(type_dict) for name, type_dict in arg_types.items()}
+
+
+def arg_values_to_json(arg_values: Dict[str, type]) -> str:
+    """Encode the supplied argument values as json"""
+    type_dict = {name: type_to_dict(typ) for name, typ in arg_values.items()}
+    return json.dumps(type_dict, sort_keys=True)
+
+
+def arg_values_from_json(arg_values_json: str) -> Dict[str, type]:
+    """Reify the encoded argument values from the format produced by arg_values_to_json."""
+    arg_values = json.loads(arg_values_json)
+    x = {name: type_from_dict(type_dict) for name, type_dict in arg_values.items()}
+    return x
 
 
 TypeEncoder = Callable[[type], str]
@@ -182,12 +199,14 @@ class CallTraceRow(CallTraceThunk):
         arg_types: str,
         return_type: Optional[str],
         yield_type: Optional[str],
+        arg_values: str,
     ) -> None:
         self.module = module
         self.qualname = qualname
         self.arg_types = arg_types
         self.return_type = return_type
         self.yield_type = yield_type
+        self.arg_values = arg_values
 
     @classmethod
     def from_trace(cls: Type[CallTraceRowT], trace: CallTrace) -> CallTraceRowT:
@@ -196,14 +215,16 @@ class CallTraceRow(CallTraceThunk):
         arg_types = arg_types_to_json(trace.arg_types)
         return_type = maybe_encode_type(type_to_json, trace.return_type)
         yield_type = maybe_encode_type(type_to_json, trace.yield_type)
-        return cls(module, qualname, arg_types, return_type, yield_type)
+        arg_values = arg_values_to_json(trace.arg_values)
+        return cls(module, qualname, arg_types, return_type, yield_type, arg_values)
 
     def to_trace(self) -> CallTrace:
         function = get_func_in_module(self.module, self.qualname)
         arg_types = arg_types_from_json(self.arg_types)
         return_type = maybe_decode_type(type_from_json, self.return_type)
         yield_type = maybe_decode_type(type_from_json, self.yield_type)
-        return CallTrace(function, arg_types, return_type, yield_type)
+        arg_values = arg_values_from_json(self.arg_values)
+        return CallTrace(function, arg_types, return_type, yield_type, arg_values)
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CallTraceRow):
@@ -213,12 +234,14 @@ class CallTraceRow(CallTraceThunk):
                 self.arg_types,
                 self.return_type,
                 self.yield_type,
+                self.arg_values,
             ) == (
                 other.module,
                 other.qualname,
                 other.arg_types,
                 other.return_type,
                 other.yield_type,
+                other.arg_values,
             )
         return NotImplemented
 
