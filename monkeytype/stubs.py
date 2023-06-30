@@ -220,12 +220,21 @@ def update_signature_return(
     return sig.replace(return_annotation=anno)
 
 
+def merge_type(arg_type: type, arg_value: type) -> type:
+    # TODO(max): Merge arg values and arg types if possible. If the primitive
+    # type holds and is more specific, use that.
+    return arg_type
+
+
 def merge_types(
     shrunken_arg_types: Dict[str, type], shrunken_arg_values: Dict[str, type]
 ) -> Dict[str, type]:
-    # TODO(max): Merge arg values and arg types if possible. If the primitive
-    # type holds and is more specific, use that.
-    return shrunken_arg_types
+    result: Dict[str, type] = {}
+    assert len(shrunken_arg_types) == len(shrunken_arg_values)
+    for name, typ in shrunken_arg_types.items():
+        assert name in shrunken_arg_values
+        result[name] = merge_type(typ, shrunken_arg_values[name])
+    return result
 
 
 def shrink_traced_types(
