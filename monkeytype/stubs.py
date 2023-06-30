@@ -220,6 +220,14 @@ def update_signature_return(
     return sig.replace(return_annotation=anno)
 
 
+def merge_types(
+    shrunken_arg_types: Dict[str, type], shrunken_arg_values: Dict[str, type]
+) -> Dict[str, type]:
+    # TODO(max): Merge arg values and arg types if possible. If the primitive
+    # type holds and is more specific, use that.
+    return shrunken_arg_types
+
+
 def shrink_traced_types(
     traces: Iterable[CallTrace],
     max_typed_dict_size: int,
@@ -244,8 +252,7 @@ def shrink_traced_types(
     shrunken_arg_values = {
         name: shrink_values(ts, max_typed_dict_size) for name, ts in arg_values.items()
     }
-    # TODO(max): Merge arg values and arg types if possible. If the primitive
-    # type holds and is more specific, use that.
+    shrunken_arg_types = merge_types(shrunken_arg_types, shrunken_arg_values)
     return_type = (
         shrink_types(return_types, max_typed_dict_size) if return_types else None
     )
